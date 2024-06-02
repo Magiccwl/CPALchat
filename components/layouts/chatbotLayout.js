@@ -1,6 +1,6 @@
 import ResponsiveNavbar from "../navigation/responsiveNavbar";
-import { useState, useEffect } from "react";
-import ChatDrawer from "../../components/navigation/chatDrawer";
+import { useState } from "react";
+import ChatDrawer from "../navigation/chatDrawer";
 import { RiExpandRightLine } from "react-icons/ri";
 import { GoSidebarExpand } from "react-icons/go";
 
