@@ -3,116 +3,88 @@ import { useRouter } from "next/router";
 import ChatController from "./chatController.js";
 import InputBoxComponent from "./inputBox.js";
 import moment from "moment";
-import axios from "axios";
 import useChatInfoStore from "../../stores/chatStore.js";
 import { useSessionStorage } from "../../hooks/useSessionStorage.js";
 import { useLocalStorage } from "../../hooks/useLocalStorage.js";
 
+import {
+  getSourceStatusAPI,
+  getDisplayRelevantFileAPI,
+  getRelevantFileAPI,
+  getChatMessageAPI,
+  getChatTitleAPI,
+  getClearChatHistoryAPI
+} from '../../api/chatbot/api.js'
+
 function Controller() {
   const [isSendChatLoading, setIsSendChatLoading] = useState(false);
   const [isGetChatLoading, setIsGetChatLoading] = useState(false);
-  const [responseStatus, setResponseStatus] = useState("");
+  const [isClearChatLoading, setIsClearChatLoading] = useState(false);
   const [fileObject, setFileObject] = useState();
-  const [inputText, setInputText] = useState("");
-  const [streamingResponse, setStreamingResponse] = useState("");
+  const setStreamingResponse = useChatInfoStore((state) => state.setStreamingResponse);
   const chatArray = useChatInfoStore((state) => state.chatArray);
   const setChatArray = useChatInfoStore((state) => state.setChatArray);
   const addChatArray = useChatInfoStore((state) => state.addChatArray);
   const popChatArray = useChatInfoStore((state) => state.popChatArray);
+  const getCurrentChatId = useChatInfoStore((state) => state.getCurrentChatId);
+  const setCurrentChatId = useChatInfoStore((state) => state.setCurrentChatId);
   const [savedChatId, setSavedChatId] = useSessionStorage("current_chatId", "");
   const [accessToken, setAccessToken] = useSessionStorage("accessToken", "");
   const [currentClient, setCurrentClient] = useLocalStorage("client", "");
   const router = useRouter();
   const chatId = router.query.id;
 
-  useEffect(() => {
-    let intervalId;
-    if (isSendChatLoading) {
-      //when you send a message
+  const inputBoxRef = useRef(null);
 
-      intervalId = setInterval(async () => {
-        if (chatId) {
-          let chatStatus = await getChatStatus(chatId);
-          setResponseStatus(chatStatus);
-        }
-      }, 1000);
-    }
+  useEffect(() => {
     if (savedChatId !== chatId && chatId) {
       //when you switch to another chat
-      console.log("tab swtiched");
+
       setChatArray([]);
       getChatMessages(chatId);
       setSavedChatId(chatId);
+      setStreamingResponse("")
     }
 
     if (savedChatId === chatId && chatArray.length === 0 && chatId) {
       //when you refresh the page
       getChatMessages(chatId);
     }
-
-    console.log("chat list", chatArray);
-    return () => {
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
-    };
-  }, [chatId, savedChatId, isSendChatLoading]);
+  }, [chatId, savedChatId]);
 
   const sendMessageClick = async () => {
-    console.log("chekcing: ", isSendChatLoading);
-    setIsSendChatLoading(true);
-    const currentInputText = inputText;
+    const currentInputText = inputBoxRef.current.getValue();
+    if (!currentInputText) {
+      return;
+    }
     let chatId = router.query.id;
+    setIsSendChatLoading(true);
     setStreamingResponse("");
-    setInputText("");
+    inputBoxRef.current.setValue("");
 
     if (!chatId) {
-      console.log("ChatId not found");
-      await setNewChatId();
-
-      chatId = router.query.id;
+      chatId = await setNewChatId();
+      setCurrentChatId(chatId);
     }
 
     if (chatId) {
-      sendMessageGivenChatId(currentInputText);
+      sendMessageGivenChatId(currentInputText, chatId);
     }
   };
 
-  const getSourceStatus = async () => {
-    let chatId = router.query.id;
-    try {
-      const response = await axios.get(
-        `/api/chatbot/getSourceStatus?chat_id=${chatId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken || ""}`,
-          },
-        }
-      );
-
-      const sourceStatus = response.data.source;
-      return sourceStatus;
-    } catch (error) {
-      return "error";
-    }
-  };
-
-  const sendMessageGivenChatId = async (messageText) => {
-    let chatId = router.query.id;
-    let clientId = currentClient.uuid
-    console.log("In progress: sendMessageGivenChatId");
+  const sendMessageGivenChatId = async (messageText, chatId) => {
+    let clientId = currentClient.uuid;
     const sendTime = moment().format("h:mm");
     const myMessage = { sender: "human", message: messageText, time: sendTime };
     addChatArray(myMessage);
-    const encodeURIInputText = encodeURIComponent(messageText);
-    console.log("THis is frontend encodeURIInputText", encodeURIInputText);
+
+    // Not sure if the context needs to be included here.
+    // const encodeURIInputText = encodeURIComponent([...chatArray, myMessage]);
+    const encodeURIInputText = encodeURIComponent([myMessage]);
 
     try {
       const response = await fetch(
-        `/api/chain/${chatId}/${clientId}/?message=${encodeURIComponent(
-          inputText
-        )}`,
-
+        `/api/chain/${chatId}/${clientId}/?message=${encodeURIInputText}`,
         {
           method: "GET",
           headers: {
@@ -123,30 +95,21 @@ function Controller() {
 
       if (!response.body)
         throw Error("ReadableStream not yet supported in this browser.");
-      console.log("This is debug input text", inputText);
       const reader = response.body.getReader();
 
       let accumulatedResponse = "";
 
       reader.read().then(async function process({ done, value }) {
         if (done) {
-          let sourceStatus = await getSourceStatus();
-          console.log("This is source status", sourceStatus);
-          let fileData;
-          if (sourceStatus == "Document_Display") {
-            fileData = await displayRelevantFile(
-              chatId,
-              inputText,
-              accumulatedResponse
-            );
-          } else {
-            fileData = await getRelevantFile(
-              chatId,
-              inputText,
-              accumulatedResponse
-            );
-          }
-          console.log("Final Bot Message", accumulatedResponse);
+          const sourceStatus = await getSourceStatusAPI(chatId);
+          
+          const fileData = await getRelevantFile(
+            chatId,
+            messageText,
+            accumulatedResponse,
+            sourceStatus == "Document_Display"
+          );
+          
           const finalBotMessage = {
             sender: "ai",
             message: accumulatedResponse,
@@ -155,8 +118,12 @@ function Controller() {
             source: sourceStatus,
           };
 
-          getChatTitle(chatId);
-          console.log("this is finalBot Message", finalBotMessage);
+          // The chatId has already changed before the fetch completed when the user switched to another chat.
+          if (chatId !== getCurrentChatId()) {
+            return;
+          }
+
+          getChatTitleAPI(chatId);
           addChatArray(finalBotMessage);
           setIsSendChatLoading(false);
 
@@ -177,19 +144,24 @@ function Controller() {
         let processedValues = decodedValue.split("data: ");
 
         for (let val of processedValues) {
-          console.log("this is val", val);
           if (val.endsWith("\n\n")) {
             val = val.slice(0, -2); // Remove the ending newline characters
           }
           accumulatedResponse = accumulatedResponse + val;
         }
 
-        setStreamingResponse(accumulatedResponse);
+        // The chatId has already changed before the fetch completed when the user switched to another chat.
+        if (chatId === getCurrentChatId()) {
+          setStreamingResponse(accumulatedResponse);
+        }
 
         return reader.read().then(process); // Continue processing the stream
       });
     } catch (error) {
-      console.log("error occured");
+      // The chatId has already changed before the fetch completed when the user switched to another chat.
+      if (chatId !== getCurrentChatId()) {
+        return;
+      }
       popChatArray();
       setStreamingResponse("");
       const errorMessage = {
@@ -201,78 +173,18 @@ function Controller() {
     }
   };
 
-  async function getChatStatus(chatId) {
-    try {
-      const response = await axios.get(
-        `/api/chatbot/getChatStatus?chat_id=${chatId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken || ""}`,
-          },
-        }
-      );
-      const chatStatus = response.data.chatStatus;
-      return chatStatus;
-    } catch (error) {
-      return "";
-    }
-  }
-
-  async function displayRelevantFile(chatId, inputText, aiResponse) {
-    let clientId = currentClient.uuid;
+  async function getRelevantFile(chatId, inputText, aiResponse, isDisplay = true) {
     const body = {
       chat_id: chatId,
-      client_id: clientId,
+      client_id: currentClient.uuid,
       human_message: inputText,
       ai_message: aiResponse,
     };
     try {
-      const response = await axios.post(
-        "/api/chatbot/getDisplayRelevantFile",
-        body,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      const request = isDisplay ? getDisplayRelevantFileAPI : getRelevantFileAPI;
+      const response = await request(body)
       if (response.status === 200) {
         const releventFile = response.data;
-        console.log("Relevent file is : ", releventFile);
-        setFileObject(releventFile);
-        return releventFile;
-      }
-    } catch (error) {
-      return setFileObject({
-        file_id: -1,
-        file_name: "No relevant file found",
-      });
-    }
-  }
-
-  async function getRelevantFile(chatId, inputText, aiResponse) {
-    let clientId = currentClient.uuid;
-    console.log("getRelevantFile");
-    console.log("chatId", chatId);
-    console.log("inputText", inputText);
-    console.log("aiResponse", aiResponse);
-    const body = {
-      chat_id: chatId,
-      client_id: clientId,
-      human_message: inputText,
-      ai_message: aiResponse,
-    };
-    try {
-      const response = await axios.post("/api/chatbot/getRelevantFile", body, {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-      });
-      if (response.status === 200) {
-        const releventFile = response.data;
-        console.log("Relevent file is : ", releventFile);
         setFileObject(releventFile);
         return releventFile;
       }
@@ -286,80 +198,43 @@ function Controller() {
 
   async function getChatMessages(chatId) {
     setIsGetChatLoading(true);
-    console.log("setIsGetChatLoading : true");
     try {
-      const response = await axios.get(
-        `/api/chatbot/getChatMessage?chat_id=${chatId}`,
-
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-          },
-        }
-      );
-
-      const messages = response.data;
+      const messages = await getChatMessageAPI(chatId);
       setChatArray(messages);
     } catch (error) {
       console.error("Error getting new chat ID", error);
       return [];
     } finally {
       setIsGetChatLoading(false);
-      console.log("setIsGetChatLoading : false");
     }
   }
 
   async function setNewChatId() {
     //when first time open the chatbot
     try {
-      console.log("chatid Not found running setNewChatId");
-      const response = await axios.get("/api/chatbot/postCreateNewChat", {
-        headers: {
-          Authorization: `Bearer ${accessToken || ""}`,
-        },
-      });
-      const chatId = response.data.chat_id;
+      const chatId = (await postCreateNewChatAPI()).chat_id;
       sessionStorage.setItem("current_chatId", chatId);
-      // router.push(`/chatbot/${chatId}`, undefined, { shallow: true });
+      router.push(`/chatbot/${chatId}`, undefined, { shallow: true });
 
       return chatId;
-    } catch (error) {
-      console.error("Error getting new chat ID", error);
-      return;
-    }
-  }
-
-  async function getChatTitle(id) {
-    try {
-      console.log("Function : UpdateChatTitle ");
-      const response = await axios.post(
-        "/api/chatbot/getChatTitle",
-        { chat_id: id },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken || ""}`,
-          },
-        }
-      );
-      //refresh
     } catch (error) {
       console.error("Error getting new chat ID", error);
     }
   }
 
   const handleRefresh = async () => {
-    const response = await axios.get("/api/chatbot/getClearChatHistory", {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json",
-      },
-    });
+    setIsClearChatLoading(true)
+    try {
+      const response = await getClearChatHistoryAPI();
 
-    if (response.status === 200) {
-      alert("Successfully clear history");
-      setChatArray([]);
-    } else {
-      alert("failed to clear history");
+      if (response.status === 200) {
+        toast("Successfully clear history");
+        setChatArray([]);
+      } else {
+        toast("failed to clear history");
+      }
+    } finally {
+      setIsClearChatLoading(false)
     }
   };
 
@@ -367,23 +242,18 @@ function Controller() {
     <div className="w-full h-screen flex flex-col">
       <div className="flex-1 overflow-auto">
         <ChatController
-          inputText={inputText}
           isSendChatLoading={isSendChatLoading}
           isGetChatLoading={isGetChatLoading}
-          streamingResponse={streamingResponse}
           messages={chatArray}
-          responseStatus={responseStatus}
-          setInputText={setInputText}
-          handleClick={sendMessageClick}
         />
       </div>
       <div className="flex-shrink-0">
         <InputBoxComponent
+          ref={inputBoxRef}
           messageLength={chatArray.length}
-          inputText={inputText}
-          setInputText={setInputText}
           isSendChatLoading={isSendChatLoading}
           isGetChatLoading={isGetChatLoading}
+          isClearChatLoading={isClearChatLoading}
           handleClick={sendMessageClick}
           handleRefresh={handleRefresh}
         />

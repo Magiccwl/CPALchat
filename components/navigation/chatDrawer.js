@@ -4,38 +4,33 @@ import moment from "moment-timezone";
 import useChatInfoStore from "../../stores/chatStore.js";
 import { useRouter } from "next/router";
 import Link from "next/link";
-import axios from "axios";
 import Spinner from "../animation/spinner";
 import { PiChatDuotone, PiTrashDuotone } from "react-icons/pi";
-import { useSessionStorage } from "../../hooks/useSessionStorage.js";
+
+import {
+  postCreateNewChatAPI,
+  postDeleteChatAPI,
+  getChatListAPI
+} from "../../api/chatbot/api.js";
 
 function ChatDrawer({}) {
   const [userTimeZone, setUserTimeZone] = useState(null);
   const [chatList, setChatList] = useState([]);
-  const [selectedChatId, setSelectedChatId] = useState(null);
   const [isDeleteChatLoading, setisDeleteChatLoading] = useState(false);
-  const [accessToken] = useSessionStorage("accessToken", "");
   const router = useRouter(); // Get the router object
   const currentChatId = useChatInfoStore((state) => state.currentChatId);
   const setChatArray = useChatInfoStore((state) => state.setChatArray);
-  
+  const selectedChatId = router.query.id;
 
   useEffect(() => {
     getChatList();
-    console.log("chatList:", chatList)
     setUserTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
   }, []);
 
   async function getChatList() {
     try {
-      console.log("Function :getChatList");
-      const response = await axios.get("/api/chatbot/getChatList", {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
-      console.log("chatlist response :", response.data);
-      setChatList(response.data);
+      const chatList = await getChatListAPI()
+      setChatList(chatList);
     } catch (error) {
       console.error("Error getting new chat ID", error);
     }
@@ -44,20 +39,8 @@ function ChatDrawer({}) {
   async function postDeleteChat(id) {
     setisDeleteChatLoading(true);
     try {
-      console.log("Function : getNewChatId ", id);
-      const response = await axios.post(
-        "/api/chatbot/postDeleteChat",
-        { chat_id: id },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken || ""}`,
-          },
-        }
-      );
+      await postDeleteChatAPI(id);
       setChatArray([]);
-    } catch (error) {
-      console.error("Error getting new chat ID", error);
-      return -1;
     } finally {
       router.push(`/chatbot`, undefined, { shallow: true });
       
@@ -65,36 +48,10 @@ function ChatDrawer({}) {
     }
   }
 
-  async function getNewChatId() {
-    try {
-      console.log("Function : getNewChatId ");
-      const response = await axios.get("/api/chatbot/postCreateNewChat", {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
-      });
-      const chatId = response.data.chat_id;
-
-      return chatId;
-    } catch (error) {
-      console.error("Error getting new chat ID", error);
-      return -1;
-    }
-  }
-
   async function handleNewConversation() {
-    const newChatId = await getNewChatId();
-    console.log("New ChatId conversation: ", newChatId);
+    const newChatId = (await postCreateNewChatAPI()).chat_id;
     setChatArray([]);
     router.push(`/chatbot/${newChatId}`, undefined, { shallow: true });
-    setSelectedChatId(newChatId);
-    await getChatList();
-  }
-
-  async function handleChatClick(id) {
-    console.log("Chat id Clicked: ", id);
-    router.push(`/chatbot/${id}`);
-    setSelectedChatId(id);
   }
 
   const groupedChats = useMemo(() => {
@@ -106,7 +63,6 @@ function ChatDrawer({}) {
     if (!userTimeZone)
       return { today: [], yesterday: [], last7Days: [], last30Days: [] };
 
-    console.log("This is userTimeZone", userTimeZone);
     const now = moment().tz(userTimeZone).startOf("day");
 
     chatList.forEach((chat) => {
@@ -147,9 +103,9 @@ function ChatDrawer({}) {
           { label: "Yesterday", chats: groupedChats.yesterday },
           { label: "Previous 7 Days", chats: groupedChats.last7Days },
           { label: "Previous 30 Days", chats: groupedChats.last30Days },
-        ].map(
+        ].filter((section) => section.chats.length > 0).map(
           (section) =>
-            section.chats.length > 0 && (
+            (
               <div
                 className="text-sm text-gray-600 px-2 py-1"
                 key={section.label}
@@ -161,7 +117,6 @@ function ChatDrawer({}) {
                   {section.chats.map((chat) => (
                     <li
                       key={chat.chat_id}
-                      onClick={() => handleChatClick(chat.chat_id)}
                       className={
                         selectedChatId === chat.chat_id
                           ? "text-blue-800 bg-gray-200 rounded-lg hover:bg-gray-200 relative"
@@ -215,5 +170,3 @@ function ChatDrawer({}) {
 }
 
 export default ChatDrawer;
-
-// "flex-shrink-0 w-8 h-8 flex items-center justify-center border-2 border-gray-300 rounded-full

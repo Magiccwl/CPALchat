@@ -1,36 +1,30 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/router";
-import Loading from "../animation/loading";
-import { FaPaperPlane, FaTrashCan, FaRegComments } from "react-icons/fa6";
+import { FaRegComments } from "react-icons/fa6";
 import {
-  PiUserDuotone,
   PiBrainDuotone,
-  PiArrowDown,
-  PiFolderUserDuotone,
-  PiGlobeSimpleDuotone,
   PiDownloadSimpleDuotone,
   PiQueueDuotone,
-  PiMagnifyingGlassDuotone,
-  PiGoogleLogoDuotone,
 } from "react-icons/pi";
-import hljs from "highlight.js";
 import "highlight.js/styles/panda-syntax-dark.css"; // choose a style of your preference
-import axios from "axios";
-import LoadingDots from "../animation/loadingDots";
 import formatDate from "../../utils/dateFormat";
-import linkify from "../../utils/linkify.js";
 import { useSessionStorage } from "../../hooks/useSessionStorage";
 import firstLetterCapitalized from "../../utils/stringManimupaltion";
 import extractUsername from "../../utils/usernameExtractor";
-import Spinner from "../animation/spinner"
+import useChatInfoStore from "../../stores/chatStore.js";
+import { getDownloadDocumentAPI, getSummaryAPI } from "../../api/chatbot/api.js";
+import {
+  renderBasedOnResponseStatus,
+  renderBasedOnSource,
+  markdownToHtml
+} from "../../utils/chatbot/index.js";
+
+import { getChatStatusAPI } from '../../api/chatbot/api.js'
 
 function ChatController({
   isSendChatLoading,
   isGetChatLoading,
-  streamingResponse,
-  messages,
-  setInputText,
-  responseStatus,
+  messages
 }) {
   const router = useRouter();
   const [user, setUser] = useSessionStorage("user", "");
@@ -41,175 +35,37 @@ function ChatController({
   }); // Add this state
   const [summaryData, setSummaryData] = useState(null);
   const { docId } = router.query;
-  const [accessToken, setAccessToken] = useSessionStorage("accessToken", "");
   const [firstLetter, setFirstLetter] = useState("");
   const [usernameExtracted, setUsernameExtracted] = useState("");
+  const [isDownloadDocumentLoading, setIsDownloadDocumentLoading] = useState(false);
+  const streamingResponse = useChatInfoStore((state) => state.streamingResponse);
+  const [responseStatus, setResponseStatus] = useState("");
 
   useEffect(() => {
     if (user) {
       setFirstLetter(firstLetterCapitalized(user.email));
       setUsernameExtracted(extractUsername(user.email));
-      // setUserTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone);
     }
   }, []);
 
-  const renderBasedOnResponseStatus = (status) => {
-    console.log("renderBasedOnResponseStatus", status);
-    switch (status[0]) {
-      case "ChatGPT":
-        return (
-          <div className="border border-purple-500/75 border-1 flex rounded-lg justify-center items-center max-w-fit">
-            <div className="flex">
-              <PiGlobeSimpleDuotone className="w-6 h-6 mx-4 my-2 text-purple-500" />
-            </div>
-            <div className="my-2 mr-5">
-              <div className="flex items-center">
-                <div className="text-gray text-xs font-bold flex aligns-center">
-                  <span className="mr-2">Browsing...</span>
-                </div>
-                <Spinner
-                  className=""
-                  size={`w-3 h-3`}
-                  tintColor={"fill-black"}
-                  bgColor={"dark:text-purple-300"}
-                />
-              </div>
-              <div className="text-gray text-xs font-medium mr-2">
-                {responseStatus[0]}
-              </div>
-            </div>
-          </div>
-        );
-      case "Google_Search":
-        return (
-          <div className="border border-red-500/75 border-1 flex rounded-lg justify-center items-center max-w-fit">
-            <div className="flex">
-              <PiGoogleLogoDuotone className="w-6 h-6 mx-4 my-2 text-red-500" />
-            </div>
-            <div className="my-2 mr-5">
-              <div className="flex items-center">
-                <div className="text-gray text-xs font-bold flex aligns-center">
-                  <span className="mr-2">Browsing...</span>
-                </div>
-                <Spinner
-                  className=""
-                  size={`w-3 h-3`}
-                  tintColor={"fill-black"}
-                  bgColor={"dark:text-red-300"}
-                />
-              </div>
-              <div className="text-gray text-xs font-medium mr-2">
-                {responseStatus[0]}
-              </div>
-            </div>
-          </div>
-        );
-      case "Document_QA_System":
-        return (
-          <div className="border border-blue-500/75 border-1 flex rounded-lg justify-center items-center max-w-fit">
-            <div className="flex">
-              <PiFolderUserDuotone className="w-6 h-6 mx-4 my-2 text-blue-500" />
-            </div>
-            <div className="my-2 mr-5">
-              <div className="flex items-center">
-                <div className="text-gray text-xs font-bold flex aligns-center">
-                  <span className="mr-2">Browsing...</span>
-                </div>
-                <Spinner
-                  className=""
-                  size={`w-3 h-3`}
-                  tintColor={"fill-black"}
-                  bgColor={"dark:text-blue-300"}
-                />
-              </div>
-              <div className="text-gray text-xs font-medium mr-2">
-                Your documents
-              </div>
-            </div>
-          </div>
-        );
-      default:
-        return (
-          <div className="mt-4">
-            <LoadingDots />
-          </div>
-        );
+  useEffect(() => {
+    let intervalId;
+    if (isSendChatLoading) {
+      //when you send a message
+      intervalId = setInterval(async () => {
+        if (chatId) {
+          let chatStatus = await getChatStatusAPI(chatId);
+          setResponseStatus(chatStatus);
+        }
+      }, 1000);
     }
-  };
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  }, [isSendChatLoading]);
 
-  const renderBasedOnSource = (sourceStatus) => {
-    switch (sourceStatus) {
-      case "ChatGPT":
-        return (
-          <div className="flex rounded-lg justify-center items-center max-w-fit bg-white rounded-md">
-            <div className="flex">
-              <PiGlobeSimpleDuotone className="w-6 h-6 mx-4 my-2 text-purple-500" />
-            </div>
-            <div className="my-2 mr-5">
-              <div className="flex items-center">
-                <div className="text-gray text-xs font-bold flex aligns-center">
-                  <span className="mr-2">ChatGPT</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      case "Google_Search":
-        return (
-          <div className="flex rounded-lg justify-center items-center max-w-fit bg-white rounded-md">
-            <div className="flex">
-              <PiGoogleLogoDuotone className="w-6 h-6 mx-4 my-2 text-red-500" />
-            </div>
-            <div className="my-2 mr-5">
-              <div className="flex items-center">
-                <div className="text-gray text-xs font-bold flex aligns-center">
-                  <span className="mr-2">Google Search</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      case "Document_QA_System":
-        return (
-          <div className="flex rounded-lg justify-center items-center max-w-fit">
-            <div className="flex">
-              <PiFolderUserDuotone className="w-6 h-6 mx-4 my-2 text-blue-500" />
-            </div>
-            <div className="my-2 mr-5">
-              <div className="flex items-center">
-                <div className="text-gray text-xs font-bold flex aligns-center">
-                  <span className="mr-2">Document Library</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      case "Document_Display":
-        return (
-          <div className="flex rounded-lg justify-center items-center max-w-fit">
-            <div className="flex">
-              <PiMagnifyingGlassDuotone className="w-6 h-6 mx-4 my-2 text-blue-500" />
-            </div>
-            <div className="my-2 mr-5">
-              <div className="flex items-center">
-                <div className="text-gray text-xs font-bold flex aligns-center">
-                  <span className="mr-2">Document Search</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        );
-      default:
-        return <></>;
-    }
-  };
-  const handleInputChange = (event) => {
-    setInputText(event.target.value);
-  };
-
-  const handleHandleInstruction = (itemText) => () => {
-    setInputText(itemText);
-  };
   const messagesEndRef = useRef(null);
 
   const scrollToBottom = () => {
@@ -217,82 +73,23 @@ function ChatController({
   };
 
   async function getDownloadDocument(id) {
-    console.log("this is id", id);
     if (!id) return;
 
-    console.log("this is download document id" + id);
+    setIsDownloadDocumentLoading(true);
     try {
-      const response = await axios.post(
-        `/api/upload/getDownloadDocument`,
-        { selectedId: id },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      const response = await getDownloadDocumentAPI(id);
 
       const url = response.data.url;
       window.open(url, "_blank");
 
-      if (response.status === 200) {
-        console.log("Document Opened");
-      }
     } catch (error) {
       console.error("Error fetching user data:", error);
-    }
-  }
-
-  function markdownToHtml(str) {
-    // Convert bold text
-    str = str.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
-
-    // Convert code blocks with syntax highlighting
-    str = str.replace(/```(.*?)\n(.*?)```/gs, function (match, lang, code) {
-      const highlightedCode = hljs.highlight(lang, code).value;
-      return `<pre><code class="hljs ${lang}">${highlightedCode}</code></pre>`;
-    });
-
-    str = linkify(str);
-
-    return str;
-  }
-
-  const downloadDocumentClick = (fileId) => {
-    getDownloadDocument(fileId);
-  };
-
-  async function getDownloadDocument(id) {
-    if (!id) return;
-
-    console.log("this is download document id" + id);
-    try {
-      const response = await axios.post(
-        `/api/upload/getDownloadDocument`,
-        { selectedId: id },
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      const url = response.data.url;
-      window.open(url, "_blank");
-
-      if (response.status === 200) {
-        console.log("Document Opened");
-      }
-    } catch (error) {
-      console.error("Error fetching user data:", error);
+    } finally {
+      setIsDownloadDocumentLoading(false);
     }
   }
 
   async function summarizeDocumentClick(blockId, fileId, index) {
-    console.log("this is blockId", blockId);
-    console.log("this is fileId", fileId);
 
     setSummaryLoading(true);
     setSummaryData("");
@@ -303,38 +100,15 @@ function ChatController({
     } else {
       setExpandedBlock({ blockId: blockId, index: index }); // Set the clicked block as the expanded block
 
-      const data = await getSummary(fileId);
-      setSummaryData(data);
+      const summary = (await getSummaryAPI(id)).message;
+      setSummaryData(summary);
     }
 
     setSummaryLoading(false);
   }
 
-  const getSummary = async (id) => {
-    const selectedId = id;
-
-    try {
-      const response = await axios.get(
-        `/api/chatbot/getSummary/?selectedId=${selectedId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
-
-      const summary = await response.data.message;
-      console.log("this is summary ", summary);
-      return summary;
-    } catch (err) {
-      console.log(err);
-      return "Error occured during summary. Please Try again.";
-    }
-  };
-
   useEffect(() => {
-    scrollToBottom;
+    scrollToBottom();
   }, [messages]);
 
   return (
@@ -358,9 +132,9 @@ function ChatController({
                   let displayMessage = item.message;
 
                   return item.sender == "human" ? (
-                    <div className="">
+                    <div key={blockId}>
                       <div className="m-auto max-w-3xl p-5">
-                        <div className="bg-white flex" key={blockId}>
+                        <div className="bg-white flex">
                           <div className="bg-green-800 text-md w-7 h-7 aspect-1 rounded-full  text-white flex items-center justify-center">
                             {firstLetter}
                           </div>
@@ -380,9 +154,9 @@ function ChatController({
                       </div>
                     </div>
                   ) : (
-                    <div className="">
+                    <div key={blockId}>
                       <div className="m-auto max-w-3xl p-5">
-                        <div className="flex" key={blockId}>
+                        <div className="flex">
                           <div className="text-white">
                             <PiBrainDuotone className="text-3xl fill-current bg-blue-600 rounded-full p-1" />
                           </div>
@@ -423,8 +197,9 @@ function ChatController({
                                                 </td>
                                                 <td className="flex px-4 py-2 items-center justify-center">
                                                   <button
+                                                    disabled={isDownloadDocumentLoading}
                                                     onClick={() =>
-                                                      downloadDocumentClick(
+                                                      getDownloadDocument(
                                                         item.file_id
                                                       )
                                                     }
@@ -435,6 +210,7 @@ function ChatController({
                                                     </div>
                                                   </button>
                                                   <button
+                                                    disabled={summaryLoading}
                                                     onClick={() =>
                                                       summarizeDocumentClick(
                                                         blockId,
@@ -494,7 +270,8 @@ function ChatController({
                                       item.relevant_files.map((data, index) => (
                                         <button
                                           key={index}
-                                          className="relative transform transition-transform px-1 mr-1 max-w-[130px] "
+                                          className="relative transform transition-transform px-1 mr-1 max-w-[130px]"
+                                          disabled={isDownloadDocumentLoading}
                                           onClick={() => {
                                             getDownloadDocument(data.file_id);
                                           }}
@@ -508,7 +285,7 @@ function ChatController({
                                 </div>
                               </>
                             ) : (
-                              <></>
+                              null
                             )}
                             <div>
                               <time className="text-xs opacity-50">
@@ -552,7 +329,7 @@ function ChatController({
                 </div>
               </div>
             ) : (
-              <></>
+              null
             )}
           </div>
         </div>

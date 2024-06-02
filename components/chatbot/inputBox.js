@@ -1,41 +1,55 @@
-import React from "react";
-import { useState, useMemo, useEffect, useRef } from "react";
-import { PiArrowDown } from "react-icons/pi";
-import { FaPaperPlane, FaTrashCan, FaRegComments } from "react-icons/fa6";
+import React, { forwardRef, useImperativeHandle } from "react";
+import { FaPaperPlane, FaTrashCan } from "react-icons/fa6";
 import { useRouter } from "next/router";
 import LoadingDots from "../animation/loadingDots";
 import LottieAnimation from "../animation/lottie-animation";
 import documentlottie from "../../public/document-loading.json";
 
+const MAX_INPUT_LENGTH = 6000;
+
+const Instruction = [
+  {
+    title: "Casual Conversation",
+    text: "Tell me a random fun fact about the Roman Empire.",
+  },
+  {
+    title: "Chat with your Documents",
+    text: "From my files, [your custom query]",
+  },
+  {
+    title: "Retrieve Specific Documents",
+    text: "Find me documents related to [Your Specific Detail]",
+  },
+  {
+    title: "On-the-Spot Info Fetch",
+    text: "What is the weather today in Irvine, CA?",
+  },
+];
+
 function InputBoxComponent({
   messageLength,
-  inputText,
-  setInputText,
   isSendChatLoading,
   isGetChatLoading,
+  isClearChatLoading,
   handleClick,
   handleRefresh,
-}) {
+}, ref) {
   const router = useRouter();
-  const messagesEndRef = useRef(null);
-  const Instruction = [
-    {
-      title: "Casual Conversation",
-      text: "Tell me a random fun fact about the Roman Empire.",
+  const [inputText, setInputText] = useState("");
+  const textareaRef = useRef(null);
+
+  useImperativeHandle(ref, () => ({
+    focus: () => {
+      textareaRef.current.focus();
     },
-    {
-      title: "Chat with your Documents",
-      text: "From my files, [your custom query]",
+    getValue: () => {
+      return inputText;
     },
-    {
-      title: "Retrieve Specific Documents",
-      text: "Find me documents related to [Your Specific Detail]",
-    },
-    {
-      title: "On-the-Spot Info Fetch",
-      text: "What is the weather today in Irvine, CA?",
-    },
-  ];
+    setValue: (val) => {
+      setInputText(val)
+    }
+  }));
+
   const handleEnter = (event) => {
     if (event.key === "Enter") {
       if (event.shiftKey) {
@@ -55,8 +69,6 @@ function InputBoxComponent({
   const handleHandleInstruction = (itemText) => () => {
     setInputText(itemText);
   };
-  //   const messagesEndRef = useRef(null);
-
 
   return (
     <div className="">
@@ -98,6 +110,7 @@ function InputBoxComponent({
             <div className="border rounded-lg ">
               <div className="">
                 <textarea
+                  ref={textareaRef}
                   rows="1"
                   style={{
                     "maxHeight?": "400px",
@@ -110,6 +123,7 @@ function InputBoxComponent({
                       : "Type your message..."
                   }
                   value={inputText}
+                  maxLength={MAX_INPUT_LENGTH}
                   disabled={isSendChatLoading}
                   onChange={handleInputChange}
                   onKeyDown={handleEnter}
@@ -118,6 +132,7 @@ function InputBoxComponent({
               <div className="flex gap-2 justify-between p-2.5 bg-white border-b rounded-b-lg">
                 <div className="flex-shrink-0 h-full px-2 py-1">
                   <button
+                    disabled={isClearChatLoading}
                     className="transition-all duration-200 relative font-semibold shadow-sm rounded-md px-3 py-1.5 text-sm bg-blue-600 text-white ring-blue-600 active:ring-0 ring-0 hover:ring-0 outline-none hover:outline-none focus:outline-none border-0 h-full opacity-75"
                     onClick={handleRefresh}
                   >
@@ -128,10 +143,11 @@ function InputBoxComponent({
                 <div className="flex-shrink-0 h-full px-2 py-1 flex">
                   <div className="flex items-center gap-2 mr-2">
                     <span className="ml-auto text-xs text-gray-500 transition-[color] duration-150 ease-in-out">
-                      {inputText.length}/6000
+                      {inputText.length} / {MAX_INPUT_LENGTH}
                     </span>
                   </div>
                   <button
+                    disabled={isSendChatLoading}
                     className={
                       "transition-all duration-200 relative font-semibold rounded-md px-3 py-1.5 text-sm text-white ring-blue-600 active:ring-0 ring-0 hover:ring-0 outline-none hover:outline-none focus:outline-none border-0 h-full opacity-75" +
                       (isSendChatLoading
@@ -156,5 +172,5 @@ function InputBoxComponent({
   );
 }
 
-export default InputBoxComponent;
+export default forwardRef(InputBoxComponent);
 // "flex-shrink-0 w-8 h-8 flex items-center justify-center border-2 border-gray-300 rounded-full
